@@ -1,9 +1,9 @@
 ---
 layout: posts
-title: Docs for MeanShift & GMM
-excerpt: "Summary of relevant materials and documents of MeanShift and GMM"
-modified: 2021-03-29
-tags: [intro, documents, R, cluster, MeanShift, GMM]
+title: Cache Optimization
+excerpt: "cache 优化相关技术"
+modified: 2021-04-04
+tags: [cache]
 comments: true
 ---
 

@@ -1,8 +1,8 @@
 ---
 layout: posts
-title: Docs for MeanShift & GMM
-excerpt: "Summary of relevant materials and documents of MeanShift and GMM"
-modified: 2021-03-29
+title: Percolator 论文理解
+excerpt: "Percolator 论文总结相关"
+modified: 2021-04-10
 tags: [bigtable, distribute system, google]
 comments: true
 ---
