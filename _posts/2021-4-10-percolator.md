@@ -60,3 +60,111 @@ comments: true
     3. 访问控制元数据
     4. 帮助 `master server` 跟踪 `tablet server`，诸如发现新 `server` 以及挂掉的 `server` 等等，集群可扩展
 
+## Percolator
+
+`Percolator` 在 `BigTable` 的基础上实现，相较于 `BigTable` 来说，`Percolator` 主要延伸出了如下新的特性：
+
+- 多行事务：保证 `snapshot isolation` 隔离级别的多行事务模型
+- 观察者框架：当用户指定的列发生变化时，系统调用的代码段
+
+### 数据样式
+
+因为 `Percolator` 基于 `BigTable` 实现，所以在数据样式或者说数据的逻辑存储结构上直接利用了 `BigTable` 的多维映射表结构。
+
+对于每一个 `BigTable` 当中的 row，`Percolator` 将需要的元数据作为一个新的 column 组织到了 `BigTable` 当中，column 定义如下：
+
+|  *Column*  |  *Use*  |
+|:------------:|:---------:|
+| **c:lock** | An uncommitted txn is writing this cell; contains the location of primary lock |
+| **c:write** | Committed data present; Stores the BigTable timestamp of the data |
+| **c:data** | Stores the data itself |
+| **c:notify** | Hint: observers may need to run |
+| **c:ack_O** | observer "O" has run; stores start timestamp of successful last run |
+
+- `notify` 表示是否需要触发在某些列上监听的 `observers`
+- `ack` 是一个简单的时间戳值，表示最近执行通知的观察者的开始时间
+- `data` kv 数据，key是时间戳，value是真实数据，包含多个entry
+- `write` KV结构，key是事务 `commit` 时间戳，value是各个时间戳下曾经写入的值
+- `lock` KV结构，key是事务 `start` 时间戳，value是锁的内容
+
+### Percolator 事务
+
+#### 目标
+
+- 锁必须持久化防止一个锁在两阶段提交之间消失，导致提交冲突的事务 --> **冗余备份**
+- 锁服务需要高吞吐量 --> **分布式**
+- 锁服务需要低延迟 --> **负载均衡**
+
+而以 `BigTable` 为基础，以上几点基本可以满足，所以在 `percolator` 中的实现就是将锁和数据存储在同一行，锁成为了一个特殊的数据列，`percolator` 在一个 `BigTable` 的行事务中对锁列进行读取和修改。
+
+#### Txn code
+
+```c++
+class Transaction {
+    struct Write{ Row row; Column: col; string value;};
+    vector<Write> writes_;
+    int start_ts_;
+
+    Transaction():start_ts_(orcle.GetTimestamp()) {}
+    void Set(Write w) {writes_.push_back(w);}
+    bool Get(Row row, Column c, string* value) {
+        while(true) {
+            bigtable::Txn = bigtable::StartRowTransaction(row);
+            // Check for locks that signal concurrent writes.
+            if (T.Read(row, c+"locks", [0, start_ts_])) {
+                // There is a pending lock; try to clean it and wait
+                BackoffAndMaybeCleanupLock(row, c);
+                continue;
+            }
+        }
+
+        // Find the latest write below our start_timestamp.
+        latest_write = T.Read(row, c+"write", [0, start_ts_]);
+        if(!latest_write.found()) return false; // no data
+        int data_ts = latest_write.start_timestamp();
+        *value = T.Read(row, c+"data", [data_ts, data_ts]);
+        return true;
+    }
+    // prewrite tries to lock cell w, returning false in case of conflict.
+    bool Prewrite(Write w, Write primary) {
+        Column c = w.col;
+        bigtable::Txn T = bigtable::StartRowTransaction(w.row);
+
+        // abort on writes after our start stimestamp ...
+        if (T.Read(w.row, c+"write", [start_ts_, max])) return false;
+        // ... or locks at any timestamp.
+        if (T.Read(w.row, c+"lock", [0, max])) return false;
+
+        T.Write(w.row, c+"data", start_ts_, w.value);
+        T.Write(w.row, c+"lock", start_ts_, 
+            {primary.row, primary.col});  // The primary's location.
+        return T.Commit();
+    }
+    bool Commit() {
+        Write primary = write_[0];
+        vector<Write> secondaries(write_.begin() + 1, write_.end());
+        if (!Prewrite(primary, primary)) return false;
+        for (Write w : secondaries)
+            if (!Prewrite(w, primary)) return false;
+
+        int commit_ts = orcle.GetTimestamp();
+
+        // Commit primary first.
+        Write p = primary;
+        bigtable::Txn T = bigtable::StartRowTransaction(p.row);
+        if (!T.Read(p.row, p.col+"lock", [start_ts_, start_ts_]))
+            return false; // aborted while working
+        T.Write(p.row, p.col+"write", commit_ts,
+            start_ts_); // Pointer to data written at start_ts_
+        T.Erase(p.row, p.col+"lock", commit_ts);
+        if(!T.Commit()) return false;  // commit point
+
+        // Second phase: write our write records for secondary cells.
+        for (Write w:secondaries) {
+            bigtable::write(w.row, w.col+"write", commit_ts, start_ts_);
+            bigtable::Erase(w.row, w.col+"lock", commit_ts);
+        }
+        return true;
+    }
+}; // class Transaction
+```
