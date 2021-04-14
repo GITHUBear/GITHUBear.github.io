@@ -207,6 +207,8 @@ class Transaction {
 
     3. 对每一个 `Write` 在 `write` 列写入 <key, commit_ts, start_ts>，删除在 `Prewrite` 阶段对 `lock` 列的修改
 
+> 图解版——>[Google Percolator 的事务模型](https://andremouche.github.io/transaction/percolator.html)
+
 #### 锁清理 & Primary Key
 
 有趣的是，在 Commit 的第一阶段 `Prewrite` 中，一个事务需要修改的 key 集合中的一个 key 失败并不会清除之前处理的 key (如 `primary key`...) 添加的 `lock` 列的修改。
