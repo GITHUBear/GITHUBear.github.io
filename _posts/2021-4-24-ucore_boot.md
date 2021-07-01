@@ -2,7 +2,7 @@
 layout: posts
 title: Ucore boot
 excerpt: "ucore lab1"
-modified: 2021-04-15
+modified: 2021-04-24
 tags: [os, ucore]
 comments: true
 ---
@@ -21,7 +21,7 @@ comments: true
 
 ## BIOS 启动过程
 
-`Intel 80386` 体系架构下，在计算机启动后，CS : IP 寄存器设置为 0xf000 : 0xffff (即物理地址 0xffff0 处开始执行)，在这里仅仅只是一个跳转指令，跳转到 `BIOS` 例行程序的执行点。
+`Intel 80386` 体系架构下，在计算机启动后，CS : IP 寄存器设置为 0xf000 : 0xffff (即物理地址 0xfffff 处开始执行)，在这里仅仅只是一个跳转指令，跳转到 `BIOS` 例行程序的执行点。
 
 `BIOS` 进行硬件自检和初始化后，会选择一个启动设备 （通常为外存储设备），读取其第一个扇区（512B）到内存 `0x7c00` 处，这部分代码就是一个 OS 的 `bootloader`。
 
